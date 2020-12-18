@@ -7,6 +7,7 @@ import concurrent.futures
 import json
 import csv
 import io
+import re
 
 BLUE='\033[94m'
 RED='\033[91m'
@@ -14,7 +15,7 @@ GREEN='\033[92m'
 YELLOW='\033[93m'
 CLEAR='\x1b[0m'
 
-print(BLUE + "Xlocate[1.0] by ARPSyndicate" + CLEAR)
+print(BLUE + "Xlocate[1.1] by ARPSyndicate" + CLEAR)
 print(YELLOW + "the ultimate exploit finder" + CLEAR)
 
 if len(sys.argv)<2:
@@ -42,8 +43,12 @@ threads = int(inputs.threads)
 result ={}
 
 def get_pocs_cveb():
-    response = requests.get("https://raw.githubusercontent.com/cvebase/cvejson-data/main/cve.json")
-    return response.json()
+    response = requests.get("https://raw.githubusercontent.com/cvebase/pocs-data/main/pocs.json").text.splitlines()
+    cves = {}
+    for pocs in response:
+        cved = json.loads(pocs)
+        cves[cved["cve_id"]] = list(set(cved["pocs"]))
+    return cves
 
 def get_pocs_exdb():
     response = requests.get("https://raw.githubusercontent.com/offensive-security/exploitdb/master/files_exploits.csv")
@@ -55,31 +60,34 @@ def get_pocs_exdb():
 
 def query_cveb(cve):
     global cveb
-    response = requests.get("https://cve.circl.lu/api/cve/"+cve, timeout=15)
-    summary = response.json()['summary']
+    response = requests.get("https://raw.githubusercontent.com/olbat/nvdcve/master/nvdcve/"+cve+".json")
+    summary = response.json()['cve']['description']['description_data'][0]['value']
     if verbose:
         print(GREEN+"[CVEBASE] "+cve+CLEAR)
     for keyword in keywords:
-        if keyword.lower() in summary.lower():
+        if re.search(keyword, summary, re.IGNORECASE):
             for poc in cveb[cve]:
                 print(BLUE + "["+keyword+"] " + poc + CLEAR)
             if keyword in result.keys():
                 result[keyword].extend(cveb[cve])
             else:
                 result[keyword] = cveb[cve]
-
+     
 def query_exdb(keyword):
     global exdb
     for exp in exdb:
         if verbose:
             print(GREEN+"[EXPLOITDB] "+exp['id']+CLEAR)
-        if keyword.lower() in exp['description'].lower():
+        if re.search(keyword, exp['description'], re.IGNORECASE):
             poc = "https://www.exploit-db.com/raw/"+exp['id']
-            print(BLUE + "["+keyword+"] " + poc + CLEAR)
             if keyword in result.keys():
-                result[keyword].append(poc)
+                if poc not in result[keyword]:
+                    print(BLUE + "["+keyword+"] " + poc + CLEAR)
+                    result[keyword].append(poc)
             else:
+                print(BLUE + "["+keyword+"] " + poc + CLEAR)
                 result[keyword] = [poc]
+
 if inputs.keys:
     if "cvebase" in sources:
         print(GREEN + "[*] gathering exploits from cvebase"+ CLEAR)
@@ -117,6 +125,7 @@ if inputs.cves:
 if inputs.output and len(result)>0:
     for key in result.keys():
         result[key] = list(set(result[key]))
+        result[key].sort()
     with open(output,"w") as f:
         f.write(json.dumps(result, indent=4, sort_keys=True))
 
